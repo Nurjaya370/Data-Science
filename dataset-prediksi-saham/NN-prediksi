@@ -1,0 +1,112 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error
+import math
+import warnings
+warnings.filterwarnings("ignore")
+
+# Membaca dataset
+df = pd.read_csv('./dataset/jakarta-Exchange.csv')
+
+# Preprocessing data
+# Preprocessing data
+df = df.dropna()  # Menghapus baris dengan missing value
+df['Date'] = pd.to_datetime(df['Date'])  # Mengubah tipe data kolom Date menjadi datetime
+columns_harga = ['Price', 'Open', 'High', 'Low']
+df[columns_harga] = df[columns_harga].replace(',', '', regex=True).astype(float)  # Mengubah tipe data kolom Price menjadi float
+df['Vol.'] = df['Vol.'].str.replace(',', '')  # Ubah tipe data kolom Vol. menjadi tipe data numerik
+df['Vol.'] = df['Vol.'].str.extract(r'(\d+\.?\d*)', expand=False).astype(float)
+df['Change %'] = df['Change %'].str.replace('%', '')  # Ubah tipe data kolom Change % menjadi tipe data numerik
+df['Change %'] = df['Change %'].str.extract(r'(\d+\.?\d*)', expand=False).astype(float)
+df = df.sort_values('Date')  # Urutkan berdasarkan tanggal
+df = df.set_index('Date')  # Set index tanggal
+
+# Normalisasi data
+scaler = MinMaxScaler(feature_range=(0, 1))
+dataset = scaler.fit_transform(df)
+
+# Membagi dataset menjadi data latih dan data uji secara acak
+train, test = train_test_split(dataset, test_size=0.2, random_state=42)
+
+# Fungsi untuk membuat dataset dengan time steps
+def create_dataset(dataset, look_back=1):
+    X, Y = [], []
+    for i in range(len(dataset) - look_back):
+        a = dataset[i:(i + look_back), :4]  # Mengambil 4 kolom pertama sebagai fitur
+        X.append(a)
+        Y.append(dataset[i + look_back, 0])  # Mengambil kolom Price sebagai target
+    return np.array(X), np.array(Y)
+
+# Membuat dataset dengan time steps
+look_back = 1
+trainX, trainY = create_dataset(train, look_back)
+testX, testY = create_dataset(test, look_back)
+
+# Mengubah dimensi input menjadi (jumlah_data, look_back * 4)
+trainX = np.reshape(trainX, (trainX.shape[0], trainX.shape[1] * trainX.shape[2]))
+
+# Membangun model sequential
+model = Sequential()
+model.add(Dense(8, input_dim=look_back * 4, activation='relu'))
+model.add(Dense(1))
+model.compile(loss='mean_squared_error', optimizer='adam')
+
+# Melatih model
+model.fit(trainX, trainY, epochs=100, batch_size=1, verbose=2)
+# Memperbaiki bentuk data pengujian
+testX = testX.reshape(testX.shape[0], testX.shape[1])
+
+# Melakukan prediksi dengan model yang telah dibuat
+testPredict = model.predict(testX)
+
+# Menghitung MSE dan RMSE pada data latih
+trainScore = mean_squared_error(trainY, trainPredict)
+print('Train MSE: %.4f' % trainScore)
+trainRMSE = math.sqrt(trainScore)
+print('Train RMSE: %.4f' % trainRMSE)
+
+# Menghitung MSE dan RMSE pada data uji
+testScore = mean_squared_error(testY, testPredict)
+print('Test MSE: %.4f' % testScore)
+testRMSE = math.sqrt(testScore)
+print('Test RMSE: %.4f' % testRMSE)
+
+# Menghitung MAE pada data latih
+trainMAE = mean_absolute_error(trainY, trainPredict)
+print('Train MAE: %.4f' % trainMAE)
+
+# Menghitung MAE pada data uji
+testMAE = mean_absolute_error(testY, testPredict)
+print('Test MAE: %.4f' % testMAE)
+
+# Mendapatkan jumlah fitur
+n_features = trainX.shape[1]
+
+# Mengubah hasil prediksi kembali ke dalam skala asli
+#trainPredict_inverse = scaler.inverse_transform(trainPredict)
+#testPredict_inverse = scaler.inverse_transform(testPredict)
+
+
+# Reshape hasil prediksi ke dalam bentuk yang sesuai
+trainPredict = trainPredict.reshape(-1)
+testPredict = testPredict.reshape(-1)
+# Menyiapkan array tanggal yang sesuai dengan data aktual
+train_dates = df.index.values[look_back:len(trainPredict)+look_back]
+test_dates = df.index.values[len(trainPredict)+look_back:len(trainPredict)+len(testPredict)+look_back]
+
+# Menampilkan hasil prediksi dan data aktual dalam bentuk grafik
+plt.figure(figsize=(12, 6))
+plt.plot(train_dates, trainPredict, label='Harga Prediksi-Train')
+plt.plot(test_dates, testPredict, label='Harga Prediksi-Test')
+plt.plot(test_dates, testY, label='Harga Aktual')
+plt.title('Harga Aktual vs. Harga Prediksi')
+plt.xlabel('Date')
+plt.ylabel('Price')
+plt.legend()
+plt.grid(True)
+plt.show()
